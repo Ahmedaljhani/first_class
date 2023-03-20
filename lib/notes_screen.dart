@@ -1,5 +1,7 @@
+import 'package:first_class/provider/NotesProvider.dart';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:provider/provider.dart';
 
 class NotesScreen extends StatefulWidget {
   NotesScreen({Key? key}) : super(key: key);
@@ -9,66 +11,39 @@ class NotesScreen extends StatefulWidget {
 }
 
 class _NotesScreenState extends State<NotesScreen> {
-  List<Map>? _notes;
-  Database? database;
-
-  Future<void> createDatabase() async {
-    // open the database
-    database = await openDatabase("notes.db", version: 1,
-        onCreate: (Database db, int version) async {
-          print("database created!");
-          // When creating the db, create the table
-          await db.execute(
-              'CREATE TABLE Note (id INTEGER PRIMARY KEY, content TEXT)');
-          print("table created!");
-        },
-      onOpen: (database) async {
-        // Get the records
-        _notes = await database.rawQuery('SELECT * FROM Note');
-        print("notes: ${_notes.toString()}");
-        print("database opened!");
-        setState(() {
-
-        });
-      }
-    );
-  }
-
-  Future<void> getNotes() async {
-    _notes = await database?.rawQuery('SELECT * FROM Note');
-    setState(() {
-
-    });
-  }
-
-  Future<void> deleteNote(int id) async {
-    // Delete a record
-    await database
-        ?.rawDelete('DELETE FROM Note WHERE id = $id');
-    getNotes();
-  }
-
-  @override
-  void initState() {
-    createDatabase();
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    database?.close();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
+    NotesProvider watcher = context.watch<NotesProvider>();
+    NotesProvider provider = context.read<NotesProvider>();
+    final delet = Container(
+      color: Colors.red,
+      // margin: const EdgeInsets.symmetric(horizontal: 15),
+      alignment: Alignment.centerRight,
+      child: const Icon(
+        Icons.delete,
+        size: 40,
+        color: Colors.white,
+      ),
+    );
+    final edit = Container(
+      color: Colors.green,
+      // margin: const EdgeInsets.symmetric(horizontal: 15),
+      alignment: Alignment.centerRight,
+      child: const Icon(
+        Icons.edit,
+        size: 40,
+        color: Colors.white,
+      ),
+    );
     return Scaffold(
       appBar: AppBar(
         title: const Text("Notes"),
         actions: [
-          IconButton(onPressed: (){
-            getNotes();
-          }, icon: const Icon(Icons.refresh))
+          IconButton(
+              onPressed: () {
+                provider.getNotes();
+              },
+              icon: const Icon(Icons.refresh))
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -82,30 +57,72 @@ class _NotesScreenState extends State<NotesScreen> {
         },
         child: const Icon(Icons.add),
       ),
-      body: _notes == null
+      body: provider.notes == null
           ? const Center(
               child: Text(
               "No Notes",
               style: TextStyle(fontSize: 32),
             ))
           : ListView.separated(
-              itemBuilder: (context, index) => GestureDetector(
-                onTap: (){
-                  int id = _notes?[index]['id'];
-                  deleteNote(id);
-                },
-                child: Card(
-                      shape: const RoundedRectangleBorder(),
-                      child: Text(
-                        _notes?[index]['content'],
-                        style: const TextStyle(fontSize: 32),
+              itemBuilder: (context, index) => Dismissible(
+                    background: delet,
+                    secondaryBackground: edit,
+                    onDismissed: (DismissDirection direction) {
+
+                      print("swipe direction: $direction");
+                      if (direction == DismissDirection.startToEnd) {
+                        delet;
+                        int id = provider.notes?[index]['id'];
+                        print("swiped id: $id");
+                        provider.deleteNote(id);
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text(
+                                '${provider.notes![index]['content']} deleted')));
+                      } else if (direction == DismissDirection.endToStart) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => EditNotesScreen(provider.notes![index]['id'],provider.notes![index]['content']),
+                          ),
+                        );
+                      }
+
+                    },
+                    key: Key(provider.notes![index]['id'].toString()),
+                    child: Container(
+                      width: double.infinity,
+                      height: 70,
+                      child: GestureDetector(
+                        onTap: () {
+                          print("ontab");
+                        },
+                        child: ListTile(
+                          visualDensity: VisualDensity(vertical: 4),
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.green,
+                            child:
+                                Text(provider.notes![index]['id'].toString(),style: TextStyle(color: Colors.white),),
+                          ),
+                          title: Text(
+                            provider.notes?[index]['content'],
+                            style: const TextStyle(fontSize: 32),
+                          ),
+                          subtitle: Text('Item description'),
+
+                          trailing: IconButton( onPressed: () {  Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => EditNotesScreen(provider.notes![index]['id'],provider.notes![index]['content']),
+                            ),
+                          );  }, icon:Icon(Icons.more_vert) ,),
+                        ),
                       ),
                     ),
-              ),
+                  ),
               separatorBuilder: (context, index) => const SizedBox(
                     height: 16,
                   ),
-              itemCount: _notes!.length),
+              itemCount: watcher.notes!.length),
     );
   }
 }
@@ -120,41 +137,10 @@ class AddNoteScreen extends StatefulWidget {
 class _AddNoteScreenState extends State<AddNoteScreen> {
   var noteController = TextEditingController();
 
-  Database? database;
-
-  Future<void> createDatabase() async {
-    // open the database
-    database = await openDatabase("notes.db", version: 1,
-        onCreate: (Database db, int version) async {
-          print("database created!");
-          // When creating the db, create the table
-          await db.execute(
-              'CREATE TABLE Note (id INTEGER PRIMARY KEY, content TEXT)');
-          print("table created!");
-        },
-        onOpen: (database) {
-          print("database opened!");
-        }
-    );
-  }
-
-  Future<void> insertToDatabase(String note) async {
-    // Insert some records in a transaction
-    await database?.transaction((txn) async {
-      int id1 = await txn.rawInsert(
-          'INSERT INTO Note(content) VALUES("$note")');
-      print('inserted: $id1');
-    });
-  }
-
-  @override
-  void initState() {
-    createDatabase();
-    super.initState();
-  }
-
   @override
   Widget build(BuildContext context) {
+    NotesProvider provider = context.read<NotesProvider>();
+    NotesProvider watcher = context.watch<NotesProvider>();
     return Scaffold(
       appBar: AppBar(
         title: const Text("Add a note"),
@@ -183,7 +169,7 @@ class _AddNoteScreenState extends State<AddNoteScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          insertToDatabase(noteController.text);
+          provider.insertToDatabase(noteController.text);
           Navigator.pop(context);
         },
         child: const Icon(Icons.note_add),
@@ -191,3 +177,67 @@ class _AddNoteScreenState extends State<AddNoteScreen> {
     );
   }
 }
+ class EditNotesScreen extends StatefulWidget {
+   int  n =0;
+   String con ="";
+  EditNotesScreen(int id ,String content){
+      n =id;
+     con =content;
+  }
+
+
+   @override
+   State<EditNotesScreen> createState() => _EditNotesScreenState(n,con);
+ }
+
+
+ class _EditNotesScreenState extends State<EditNotesScreen> {
+   var noteEditController = TextEditingController();
+   int  n =-1;
+   _EditNotesScreenState(int id ,String content){
+     n =id;
+     noteEditController.text=content;
+   }
+
+   @override
+   Widget build(BuildContext context) {
+
+     NotesProvider provider = context.read<NotesProvider>();
+     NotesProvider watcher = context.watch<NotesProvider>();
+     return Scaffold(
+       appBar: AppBar(
+         title: const Text("Enter your changes "),
+       ),
+       body: SizedBox(
+         width: double.infinity,
+         child: Padding(
+           padding: const EdgeInsets.symmetric(horizontal: 16.0),
+           child: Column(
+             mainAxisSize: MainAxisSize.max,
+             mainAxisAlignment: MainAxisAlignment.center,
+             children: [
+               TextFormField(
+                 decoration: const InputDecoration(
+                   label: Text("Add new changes"),
+                   icon: Icon(Icons.note),
+                   border: UnderlineInputBorder(),
+                 ),
+                 keyboardType: TextInputType.multiline,
+                 controller: noteEditController,
+                 style: const TextStyle(fontSize: 24),
+               )
+             ],
+           ),
+         ),
+       ),
+       floatingActionButton: FloatingActionButton(
+         onPressed: () {
+           // provider.insertToDatabase(noteEditController.text);
+           provider.editNote(n, noteEditController.text);
+           Navigator.pop(context);
+         },
+         child: const Icon(Icons.edit_note),
+       ),
+     );
+   }
+ }
